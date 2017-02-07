@@ -11,7 +11,7 @@ class ProductDistribution(Distribution):
     def __init__(self, distributions):
         self.distributions = distributions
         self.dimensions = [x.dim for x in self.distributions]
-        self._dim = sum(self.dimensions) 
+        self._dim = sum(self.dimensions)
 
     @property
     def dim(self):
@@ -25,11 +25,6 @@ class ProductDistribution(Distribution):
         out = []
         for slice_from, slice_to, dist in zip([0] + cum_dims, cum_dims, self.distributions):
             sliced = x[:, slice_from:slice_to]
-            if isinstance(dist, Categorical):
-                if isinstance(sliced, np.ndarray):
-                    sliced = np.cast['uint8'](sliced)
-                else:
-                    sliced = tf.cast(sliced, dtype=tf.uint8)
             out.append(sliced)
         return out
 
