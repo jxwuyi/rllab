@@ -5,6 +5,9 @@ from rllab.envs.base import Step
 from rllab.core.serializable import Serializable
 import curses
 
+# important!
+from cached_property import cached_property
+
 dead_reward = -10
 escape_reward = 10
 collide_reward = -1
@@ -152,14 +155,13 @@ class MultiAgentGridWorldEnv(Env, Serializable):
 
     # n: number of agents
     def __init__(self, n=2, desc='4x4', seed=0):
-        
+
         assert(n <= 6 and n >= 0);
         if ('single' in desc):
             assert(n == 1)
         elif ('fix' not in desc):
             assert(n > 0)
 
-        
         Serializable.quick_init(self, locals())
         self.fixed = ('fix' in desc)
         self.input_desc = desc
@@ -171,9 +173,9 @@ class MultiAgentGridWorldEnv(Env, Serializable):
                 print ("Number of agents (%d) in the map differs from the input (%d)!" % (n_in_map, n))
                 print (" --> set n_agent to %d" % (n_in_map))
             n = n_in_map
-        
+
         assert(n > 0) # must be positive number of agents
-                
+
         desc = np.array(list(map(list, desc)))
         self.raw_desc = desc
         self.n_row, self.n_col = desc.shape
@@ -184,7 +186,7 @@ class MultiAgentGridWorldEnv(Env, Serializable):
         self.gen_initial_state()
         self.domain_fig = None
         self.last_action = None
-        
+
     # generate start positions and goal positions for agents
     #  --> assume every map is fully connected
     def get_empty_location(self):
@@ -244,9 +246,8 @@ class MultiAgentGridWorldEnv(Env, Serializable):
         # re-generate all the positions of the agents
         self.gen_start_and_goal()
         self.gen_initial_state()
-        
+
         assert self.observation_space.contains(self.state)
-        
         return self.state
 
     # printer functions
@@ -271,7 +272,7 @@ class MultiAgentGridWorldEnv(Env, Serializable):
             a = -1 if self.last_action is None else self.last_action[i]
             ret += c + " -> " + self.direction_from_action(a) + "\n"
         return ret
-             
+
     def render(self):
         content = self.get_content_str() + ">>> any key to cont ...\n"
         screen = curses.initscr()
@@ -284,7 +285,6 @@ class MultiAgentGridWorldEnv(Env, Serializable):
             curses.endwin()
             raise KeyboardInterrupt
         curses.endwin()
-        
 
     @staticmethod
     def action_from_direction(d):
@@ -305,18 +305,6 @@ class MultiAgentGridWorldEnv(Env, Serializable):
         if d < 0 or d >= 5:
             return "N/A"
         return ["left","down","right","up","stay"][d]
-    
-    # Helper Method
-    def plot_current_map(self):
-        ret = self.raw_desc.copy()
-        for i in range(self.n_agent):
-            if self.cur_pos[i][0] > -1:
-                ret[self.tar_pos[i]] = chr(ord('a') + i)
-        for i in range(self.n_agent):
-            if self.cur_pos[i][0] > -1:
-                ret[self.cur_pos[i]] = chr(ord('A') + i)
-        return ret
-
 
     def step(self, action):
         """
@@ -342,12 +330,10 @@ class MultiAgentGridWorldEnv(Env, Serializable):
         next_state = next_state_info[0]
 
         self.state = next_state
-        
+
         self.last_action = action
         return Step(observation=self.state, reward=reward, done=done)
 
-    
-    
     def get_possible_next_states(self, action):
         """
         Given the action, return a list of possible next states and their probabilities. Only next states
@@ -357,7 +343,7 @@ class MultiAgentGridWorldEnv(Env, Serializable):
                  here s' = (observation, next_agent_positions, reward, done)
         """
         # action is a list of int, containing action for each agent
-        
+
         assert (len(action) == self.n_agent)
 
         # if agent_i escapes, pos[i] = [-1, -1]
@@ -369,7 +355,7 @@ class MultiAgentGridWorldEnv(Env, Serializable):
         increments = [[0, -1], [1, 0], [0, 1], [-1, 0], [0, 0]]
         next_coors = []
         mark = [False] * self.n_agent
-        
+
         # move agents
         for i in range(self.n_agent):
             x, y = coors[i]
@@ -393,9 +379,9 @@ class MultiAgentGridWorldEnv(Env, Serializable):
                     remain -= 1 # dead
                     mark[i] = True
                     done = True # game over
-        
+
         assert(remain >= 0)
-        
+
         # check collisions
         while True:
             has_colide = False
@@ -418,7 +404,7 @@ class MultiAgentGridWorldEnv(Env, Serializable):
                             break
             if not has_colide:
                 break
-            
+
         # update next_state and check escape    
         for i in range(self.n_agent):
             if next_coors[i] == coors[i]: # do nothing
@@ -436,20 +422,20 @@ class MultiAgentGridWorldEnv(Env, Serializable):
             else: # normal move
                 next_state[0][x][y] = -1   # shared channel
                 next_state[i + 1][x][y] = -1  # private channel
-        
+
         # check if finished
         if remain == 0:
             done = True
-        assert(remain >= 0)    
-            
+        assert(remain >= 0)
+
         # return, currently assume deterministic transition
         return [(next_state, next_coors, reward, done, 1.)]
 
-    @property
+    @cached_property
     def action_space(self):
         return Product(self.n_agent * [Discrete(5)])
 
-    @property
+    @cached_property
     def observation_space(self):
         # channel 0: raw map, -1~hole, 0~free, 0.5~agent, 1~wall
         # channel i+1: agent_i, -1~goal, 0~free, 1~agent
