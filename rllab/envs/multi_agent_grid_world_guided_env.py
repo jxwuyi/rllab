@@ -10,6 +10,7 @@ from cached_property import cached_property
 
 dead_reward = -10
 escape_reward = 10
+guided_reward = 1
 collide_reward = -1
 hit_wall_reward = -0.25
 
@@ -151,17 +152,23 @@ def gen_empty_map_from_desc(desc):
     n,m = list(map(int,re.findall('\d+',desc)))
     return [['.'] * m] * n
 
-class MultiAgentGridWorldEnv(Env, Serializable):
+class MultiAgentGridWorldGuidedEnv(Env, Serializable):
     """
     'A','B',..., 'F' : starting points of agents A, B, C,...,F
     'a', 'b', ..., 'f': goals of agents A, B, ..., F
     '.': free space
     'x': wall
     'o': hole (terminates episode)
+    succeed reward: <escape reward>
+    move closer to goal: <guided_reward>
+
+    [NOTE] assume no collision
     """
 
     # n: number of agents
-    def __init__(self, n=2, desc='4x4', seed=0):
+    def __init__(self, n=2, desc='4x4', seed=0,
+                 collision = False,
+                 swap_goal_obs = False):
 
         assert(n <= 6 and n >= 0);
         if ('single' in desc):
@@ -192,11 +199,27 @@ class MultiAgentGridWorldEnv(Env, Serializable):
         self.n_row, self.n_col = desc.shape
         self.n_agent = n # number of agents
 
+        if self.n_agent == 1:
+            swap_goal_obs = False
+            collision = False
+        self.collision = collision
+        self.swap_goal_obs = swap_goal_obs
+
         # generate starting locations and goals
         self.gen_start_and_goal()
         self.gen_initial_state()
+        self.compute_distance()
+        # set original distance
+        self.best_dist = [self.dist[i][self.cur_pos[i]] for i in range(self.n_agent)]
         self.domain_fig = None
         self.last_action = None
+
+    # get channel id
+    def get_agent_goal(self, i):
+        if not self.swap_goal_obs:
+            return 2 * i + 3
+        j = ( i + 1 ) % self.n_agent
+        return 2 * j + 3
 
     # generate start positions and goal positions for agents
     #  --> assume every map is fully connected
@@ -265,8 +288,8 @@ class MultiAgentGridWorldEnv(Env, Serializable):
             cp = self.cur_pos[i]
             tp = self.tar_pos[i]
             self.state[2*i+2][cp[0]][cp[1]]=1 #current position
-            self.state[2*i+3][tp[0]][tp[1]]=1 #goal
-            self.state[1][cp[0]][cp[1]]=1 #agent
+            self.state[self.get_agent_goal(i)][tp[0]][tp[1]]=1 #goal
+            self.state[1][cp[0]][cp[1]]=1 #shared agent channel
         for x in range(self.n_row):
             for y in range(self.n_col):
                 if self.raw_desc[x][y] == 'x':
@@ -274,32 +297,84 @@ class MultiAgentGridWorldEnv(Env, Serializable):
                 elif self.raw_desc[x][y] == 'o':
                     self.state[0][x][y] = -1 # hole
 
+    # compute distance to goal for each cell
+    #   -1 for can't reach
+    def compute_distance(self):
+        self.desc = self.raw_desc.copy()
+        self.dist = []
+        for i in range(self.n_agent):
+            dis = np.ones((self.n_row, self.n_col), dtype=np.int32) * -1
+            if self.cur_pos[i][0] < 0: # already escaped
+                self.dist.append(dis)
+                continue
+            gx, gy = self.tar_pos[i]
+            dis[gx,gy] = 0
+            que = [(gx,gy)]
+            pt = 0
+            while pt < len(que):
+                cx, cy = que[pt]
+                pt += 1
+                for dx, dy in zip([1,-1,0,0],[0,0,-1,1]):
+                    tx, ty = cx + dx, cy + dy
+                    if tx < 0 or ty < 0 \
+                        or tx >= self.n_row or ty >= self.n_col \
+                        or dis[tx, ty] > -1 \
+                        or self.desc[tx, ty] in ['#', 'o']:
+                        continue
+                    dis[tx, ty] = dis[cx, cy] + 1
+                    que.append((tx, ty))
+            if dis[self.cur_pos[i]] < 0:
+                print(self.desc)
+                print(i)
+                print(self.cur_pos)
+                print (dis)
+                print('[ERROR] map not connected for agent#{s}'.format(
+                        s=chr(ord('A')+i)))
+                assert(False)
+            self.dist.append(dis)
+
     def reset(self):
         # re-generate all the positions of the agents
         self.gen_start_and_goal()
         # generate observations
         self.gen_initial_state()
-
+        # compute distance
+        self.compute_distance()
+        # set initial distance
+        self.best_dist = [self.dist[i][self.cur_pos[i]] for i in range(self.n_agent)]
         #assert self.observation_space.contains(self.state)
         return self.state
 
     # printer functions
-    def get_content_str(self):
-        self.desc = self.raw_desc.copy()
+    def get_current_map(self):
+        self.desc = self.raw_desc_backup.copy()
+        # clear maps
         for i in range(self.n_agent):
             c = chr(ord('A')+i)
             x,y = self.get_spec_location(c)
             if x > -1:
                 self.desc[x,y] = '.'
-            if (self.cur_pos[i][0] == -1):
-                self.desc[self.tar_pos[i]] = '.'
-            elif not self.fixed:
+            c = chr(ord('a')+i)
+            x,y = self.get_spec_location(c)
+            if x > -1:
+                self.desc[x,y] = '.'
+        # fill goals
+        for i in range(self.n_agent):
+            if self.cur_pos[i][0] > -1:
                 self.desc[self.tar_pos[i]] = chr(ord('a')+i)
+        # fill agents
         for i in range(self.n_agent):
             x,y=self.cur_pos[i]
-            c = chr(ord('A')+i)
-            if x > -1:
-                self.desc[x,y] = c
+            if x > -1 and self.desc[x,y] != '*':
+                c = chr(ord('A')+i)
+                if self.desc[x,y].isupper():
+                    # agents stacked in the same cell
+                    self.desc[x][y] = '*'
+                else:
+                    self.desc[x][y] = c
+
+    def get_content_str(self):
+        self.get_current_map()
         ret = ''
         for i in range(self.n_row):
             ret += "".join(self.desc[i])+"\n"
@@ -419,46 +494,59 @@ class MultiAgentGridWorldEnv(Env, Serializable):
         assert(remain >= 0)
 
         # check collisions
-        while True:
-            has_colide = False
-            for i in range(self.n_agent):
-                if not mark[i]:
-                    for j in range(self.n_agent):
-                        if j == i:
-                            continue
-                        # move to the same cell || move in opposite dir
-                        if next_coors[j] == next_coors[i] or \
-                           (next_coors[j] == coors[i] and coors[j] == next_coors[i]):
-                            has_colide = True
-                            next_coors[i] = coors[i]
-                            mark[i] = True
-                            reward += collide_reward
-                            if not mark[j]:
-                                mark[j] = True
+        if self.collision:
+            while True:
+                has_colide = False
+                for i in range(self.n_agent):
+                    if not mark[i]:
+                        for j in range(self.n_agent):
+                            if j == i:
+                                continue
+                            # move to the same cell || move in opposite dir
+                            if next_coors[j] == next_coors[i] or \
+                               (next_coors[j] == coors[i] and coors[j] == next_coors[i]):
+                                has_colide = True
+                                next_coors[i] = coors[i]
+                                mark[i] = True
                                 reward += collide_reward
-                                next_coors[j] = coors[j]
-                            break
-            if not has_colide:
-                break
+                                if not mark[j]:
+                                    mark[j] = True
+                                    reward += collide_reward
+                                    next_coors[j] = coors[j]
+                                break
+                if not has_colide:
+                    break
 
+        # clear location channels
+        for i in range(self.n_agent):
+            x, y = coors[i]
+            if x > -1:
+                next_state[1][x][y] = 0
+                next_state[2*i+2][x][y] = 0
         # update next_state and check escape    
         for i in range(self.n_agent):
-            if next_coors[i] == coors[i]: # do nothing
+            if next_coors[i] == coors[i]: # didn't move, do nothing
                 continue
-            x, y = coors[i]
-            next_state[1][x][y] = 0 # agents map
-            next_state[2*i+2][x][y] = 0 # current loc
             # check escape
             x, y = next_coors[i]
             if self.raw_desc[x][y] == chr(ord('a') + i): # reach goal
                 remain -= 1
                 reward += escape_reward # a good thing!
-                next_state[2*i+2][x][y] = 0
-                next_state[2*i+3][x][y] = 0 # clear the target pos
+                next_state[self.get_agent_goal(i)][x][y] = 0 # clear the target pos
                 next_coors[i] = (-1, -1)
             else: # normal move
-                next_state[1][x][y] = 1   # shared agent map
-                next_state[2*i+2][x][y] = 1  # private channel
+                # check distance
+                if self.dist[i][next_coors[i]] > -1 and \
+                    self.dist[i][next_coors[i]] < self.best_dist[i]:
+                    # move closer
+                    reward += guided_reward
+                    self.best_dist[i] = self.dist[i][next_coors[i]]
+        # fill shared location channels
+        for i in range(self.n_agent):
+            x, y = next_coors[i]
+            if x > -1:
+                next_state[1][x][y] = 1
+                next_state[2*i+2][x][y] = 1
 
         # check if finished
         if remain == 0:

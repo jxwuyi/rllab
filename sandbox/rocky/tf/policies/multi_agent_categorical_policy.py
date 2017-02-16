@@ -27,6 +27,7 @@ class MultiAgentCategoricalMLPPolicy(StochasticPolicy, LayersPowered, Serializab
             comm_layers = [10],
             act_dim = 5,
             shared_weights = True, # whether agents share the weights
+            hid_func = tf.nn.elu
     ):
         """
         :param env_spec: A spec for the mdp.
@@ -43,7 +44,7 @@ class MultiAgentCategoricalMLPPolicy(StochasticPolicy, LayersPowered, Serializab
         assert(n_row > 0 and n_col > 0 and n_agent > 0)
         if (n_agent == 1):
             assert(msg_dim == 0)
-        
+
         self.shared_weights = shared_weights
         self.n_row, self.n_col, self.n_agent = n_row, n_col, n_agent
 
@@ -55,16 +56,16 @@ class MultiAgentCategoricalMLPPolicy(StochasticPolicy, LayersPowered, Serializab
         map_size = n_row * n_col
 
         with tf.variable_scope(name):
-        
+
             self.input = L.InputLayer((None, env_spec.observation_space.flat_dim))
-            
+
             shared_map = L.SliceLayer(self.input,
-                                      indices=slice(map_size),
+                                      indices=slice(map_size * 2),
                                       axis = 1)
             outputs = []
             msgs = []
-            
-            with tf.variable_scope(name + '-single-net') as scope:      
+
+            with tf.variable_scope(name + '-single-net') as scope:
                 if msg_dim == 0:
                     # no communication, directly output probabilities
                     out_dim = act_dim
@@ -74,36 +75,36 @@ class MultiAgentCategoricalMLPPolicy(StochasticPolicy, LayersPowered, Serializab
                 else:
                     # communication
                     out_dim = feature_dim + msg_dim
-                    out_nonlinear = tf.nn.elu 
+                    out_nonlinear = hid_func
                 # construct network
                 for i in range(n_agent):
                     cur_self_map = L.SliceLayer(self.input,
-                                                indices=slice(map_size*(i+1),map_size*(i+2)),
+                                                indices=slice(map_size*(2*i+2),map_size*(2*i+4)),
                                                 axis = 1)
                     comb_input = L.concat([shared_map, cur_self_map], axis=1)
-                    recons_input = L.reshape(comb_input, ([0], 2, map_size)) # (batch, 2, map_size)
+                    recons_input = L.reshape(comb_input, ([0], 4, map_size)) #(batch, 4, map_size)
                     cur_input = L.reshape(
                                     L.dimshuffle(recons_input, [0, 2, 1]),
-                                    ([0],n_row,n_col,2)
+                                    ([0],n_row,n_col,4)
                                 ) # (batch, flat_dim(row, col, channel))
-                    
+
                     curr_name = "single_conv_network"
                     if not self.shared_weights:
                         curr_name += "_%d" % (i)
                     single_network = ConvNetwork(
                         name = curr_name,
-                        input_shape=(n_row,n_col,2),
+                        input_shape=(n_row,n_col,4),
                         output_dim=out_dim,
                         conv_filters=conv_layers,
                         conv_filter_sizes = [3] * len(conv_layers),
                         conv_strides = [1] * len(conv_layers),
                         conv_pads = ['SAME'] * len(conv_layers),
-                        hidden_nonlinearity = tf.nn.elu,
+                        hidden_nonlinearity = hid_func,
                         hidden_sizes = self.hidden_layers,
                         output_nonlinearity = out_nonlinear,
                         input_layer = cur_input
                     )
-                    
+
                     cur_output = single_network.output_layer # (batch, out_dim)
                     if (msg_dim == 0):
                         outputs.append(cur_output)
@@ -116,7 +117,6 @@ class MultiAgentCategoricalMLPPolicy(StochasticPolicy, LayersPowered, Serializab
                                          indices=slice(feature_dim),
                                          axis=1)
                         )
-                    
                     if i == 0 and self.shared_weights:
                         scope.reuse_variables()
 
@@ -139,25 +139,25 @@ class MultiAgentCategoricalMLPPolicy(StochasticPolicy, LayersPowered, Serializab
                             input_shape = (comb_dim,),
                             output_dim = act_dim,
                             hidden_sizes = comm_layers,
-                            hidden_nonlinearity=tf.nn.elu,
+                            hidden_nonlinearity=hid_func,
                             output_nonlinearity=tf.nn.softmax,
                             input_layer=comb_features
-                        )            
-                        
+                        )
+
                         final_outputs.append(comm_network.output_layer)
-                        
+
                         if i == 0 and self.shared_weights:
                             scope.reuse_variables()
-            
+
             self.output_probs = L.concat(final_outputs, axis = 1)
-            
+
             self.f_prob = tensor_utils.compile_function(
                 [self.input.input_var],
                 L.get_output(self.output_probs)
             )
 
             self._dist = ProductDistribution([Categorical(c.n) for c in env_spec.action_space.components])
-            
+
             super(MultiAgentCategoricalMLPPolicy, self).__init__(env_spec)
             LayersPowered.__init__(self, final_outputs)
 
