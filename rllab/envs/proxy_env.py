@@ -26,6 +26,10 @@ class ProxyEnv(Env):
     def render(self, *args, **kwargs):
         return self._wrapped_env.render(*args, **kwargs)
 
+    def add_agent_info(self, info):
+        if callable(getattr(self._wrapped_env,'add_agent_info',None)):
+            self._wrapped_env.add_agent_info(info)
+
     def log_diagnostics(self, paths):
         self._wrapped_env.log_diagnostics(paths)
 

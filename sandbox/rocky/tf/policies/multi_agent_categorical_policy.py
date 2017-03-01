@@ -47,6 +47,8 @@ class MultiAgentCategoricalMLPPolicy(StochasticPolicy, LayersPowered, Serializab
 
         self.shared_weights = shared_weights
         self.n_row, self.n_col, self.n_agent = n_row, n_col, n_agent
+        self.msg_dim = msg_dim
+        self.act_dim = act_dim
 
         # NOTE: *IMPORTANT* 
         #    RLLab requires all the passed-in arguments to remain unchanged!
@@ -150,10 +152,17 @@ class MultiAgentCategoricalMLPPolicy(StochasticPolicy, LayersPowered, Serializab
                             scope.reuse_variables()
 
             self.output_probs = L.concat(final_outputs, axis = 1)
-
+            # gen output function
+            output_vars = L.get_output(self.output_probs)
+            if msg_dim > 0:
+                # also output comm msgs
+                output_vars = [output_vars]
+                for m in msgs:
+                    # [TODO] switch to .output_var????
+                    output_vars.append(L.get_output(m))
             self.f_prob = tensor_utils.compile_function(
                 [self.input.input_var],
-                L.get_output(self.output_probs)
+                output_vars
             )
 
             self._dist = ProductDistribution([Categorical(c.n) for c in env_spec.action_space.components])
@@ -178,6 +187,8 @@ class MultiAgentCategoricalMLPPolicy(StochasticPolicy, LayersPowered, Serializab
     @overrides
     def dist_info(self, obs, state_infos=None):
         val = self.f_prob(obs)
+        if self.msg_dim > 0:
+            val = val[0]
         outputs = self._dist._split_x(val) # split compact outputs
         D = dict()
         assert(len(outputs) == self.n_agent)
@@ -193,17 +204,28 @@ class MultiAgentCategoricalMLPPolicy(StochasticPolicy, LayersPowered, Serializab
     def get_action(self, observation):
         flat_obs = self.observation_space.flatten(observation)
         val = self.f_prob([flat_obs])
+        msgs = None
+        if self.msg_dim > 0:
+            msgs = val[1:]
+            val = val[0]
         prob_arr = self._dist._split_x(val)
         probs = [p[0] for p in prob_arr]
         actions = [s.weighted_sample(p) for s, p in zip(self.action_space.components, probs)]
         D = dict()
         for i, p in enumerate(probs):
             D['id_%d_prob' % i] = p
+        if msgs is not None:
+            for i in range(self.n_agent):
+                D['msg_%d' % i] = msgs[i]
         return actions, D
 
     def get_actions(self, observations):
         flat_obs = self.observation_space.flatten_n(observations)
         val = self.f_prob(flat_obs)
+        msgs = None
+        if self.msg_dim > 0:
+            msgs = val[1:]
+            val = val[0]
         probs = self._dist._split_x(val)
         assert(len(probs) == self.n_agent)
         rev_actions = [list(map(c.weighted_sample, p)) for p,c in zip(probs,self.action_space.components)]
@@ -214,6 +236,9 @@ class MultiAgentCategoricalMLPPolicy(StochasticPolicy, LayersPowered, Serializab
         D = dict()
         for i, p in enumerate(probs):
             D['id_%d_prob' % i] = p
+        if msgs is not None:
+            for i in range(self.n_agent):
+                D['msg_%d' % i] = msgs[i]
         return actions, D
 
     @property

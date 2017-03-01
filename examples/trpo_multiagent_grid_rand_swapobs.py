@@ -13,6 +13,8 @@ import rllab.misc.logger as logger
 # arguments
 import argparse
 
+import os
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--desc', type=str, default='None')
 parser.add_argument('--iter', type=int, default=501)
@@ -34,7 +36,6 @@ if args.swapobs:
     prefix = prefix + 'swap_obs/'
 policy_dir = None if args.logdir == 'None' else prefix+args.logdir
 if policy_dir is not None:
-    import os
     if not os.path.exists(policy_dir):
             os.makedirs(policy_dir)
 store_mode = None if policy_dir is None else 'gap'
@@ -51,6 +52,16 @@ if args.desc is not 'None':
 logger.set_snapshot_dir(policy_dir)
 logger.set_snapshot_mode(store_mode)
 logger.set_snapshot_gap(store_gap)
+
+if policy_dir is not None:
+    track_files = ['progress.csv','params.json','debug.log']
+    for track_file in track_files:
+        fname = policy_dir + '/' + track_file
+        if os.path.isfile(fname):
+            os.remove(fname)
+    logger.add_tabular_output(policy_dir+'/'+track_files[0])
+    #logger.log_parameters_lite(policy_dir+'/'+track_files[1])
+    logger.add_text_output(policy_dir+'/'+track_files[2])
 
 env = TfEnv(normalize(MultiAgentGridWorldGuidedEnv(n = n_agent,
                                                    desc = map_desc,

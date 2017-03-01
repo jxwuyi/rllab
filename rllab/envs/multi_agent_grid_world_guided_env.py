@@ -169,7 +169,6 @@ class MultiAgentGridWorldGuidedEnv(Env, Serializable):
     def __init__(self, n=2, desc='4x4', seed=0,
                  collision = False,
                  swap_goal_obs = False):
-
         assert(n <= 6 and n >= 0);
         if ('single' in desc):
             assert(n == 1)
@@ -213,6 +212,7 @@ class MultiAgentGridWorldGuidedEnv(Env, Serializable):
         self.best_dist = [self.dist[i][self.cur_pos[i]] for i in range(self.n_agent)]
         self.domain_fig = None
         self.last_action = None
+        self.agent_msgs = None
 
     # get channel id
     def get_agent_goal(self, i):
@@ -382,6 +382,12 @@ class MultiAgentGridWorldGuidedEnv(Env, Serializable):
             c = chr(ord('A')+i)
             a = -1 if self.last_action is None else self.last_action[i]
             ret += c + " -> " + self.direction_from_action(a) + "\n"
+        if self.agent_msgs is not None:
+            for i in range(self.n_agent):
+                msg = np.array(self.agent_msgs[i])
+                msg_str = np.array2string(msg,precision=5,separator=',')
+                c = chr(ord('A')+i)
+                ret += c + ' Msg = ' + msg_str + "\n"
         return ret
 
     def render(self):
@@ -416,6 +422,14 @@ class MultiAgentGridWorldGuidedEnv(Env, Serializable):
         if d < 0 or d >= 5:
             return "N/A"
         return ["left","down","right","up","stay"][d]
+
+    # special method for recording msgs
+    def add_agent_info(self,info):
+        if isinstance(info,dict) and 'msg_0' in info.keys():
+            self.agent_msgs = []
+            for i in range(self.n_agent):
+                msg = info['msg_%d'%i]
+                self.agent_msgs.append(msg)
 
     def step(self, action):
         """
