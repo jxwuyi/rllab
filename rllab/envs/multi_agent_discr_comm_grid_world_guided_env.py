@@ -152,8 +152,6 @@ def gen_empty_map_from_desc(desc):
     n,m = list(map(int,re.findall('\d+',desc)))
     return [['.'] * m] * n
 
-#[TODO] to rewrite the following code
-
 class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
     """
     'A','B',..., 'F' : starting points of agents A, B, C,...,F
@@ -170,7 +168,8 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
     # n: number of agents
     def __init__(self, n=2, desc='4x4', seed=0,
                  collision = False,
-                 swap_goal_obs = False):
+                 swap_goal_obs = False,
+                 has_comm_msg = True):
         assert(n <= 6 and n >= 0);
         if ('single' in desc):
             assert(n == 1)
@@ -180,6 +179,7 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
         Serializable.quick_init(self, locals())
         self.fixed = ('fix' in desc)
         self.input_desc = desc
+        self.has_comm_msg = has_comm_msg
         assert(isinstance(desc, str))
         if 'empty' in desc:
             desc = gen_empty_map_from_desc(desc)
@@ -219,9 +219,9 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
     # get channel id
     def get_agent_goal(self, i):
         if not self.swap_goal_obs:
-            return 2 * i + 3
+            return 1 + self.n_agent*2 + i
         j = ( i + 1 ) % self.n_agent
-        return 2 * j + 3
+        return 1 + self.n_agent*2 + j
 
     # generate start positions and goal positions for agents
     #  --> assume every map is fully connected
@@ -252,6 +252,7 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
         self.cur_pos_map = [[-1] * self.n_col] * self.n_row
         self.tar_pos = []
         self.is_done = [False] * self.n_agent
+        self.obs_order = np.random.permutation(self.n_agent)
         for agent in range(self.n_agent):
             # start position
             c = chr(ord('A')+agent)
@@ -278,20 +279,20 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
     # generate initial states
     #  --> must be called after gen_start_and_goal()
     #  states[0]: global map for obstacles
-    #  states[1]: agents locations
-    #  states[2*i+2] for i >= 0: agent_i position
-    #  states[2*i+3] for i >= 0: goal of agent_i
-    #   > total 2 * n_agent + 2 channels
+    #  states[1...n_agent]: agents locations for agent_{0..n-1}
+    #  states[n_agent+1..n_agent*2]: shuffled agent goals
+    #  states[n_agent*2+1...n_agent*3] for i >= 0: goal of agent_{i+1}
+    #   > total 3 * n_agent + 1
     def gen_initial_state(self):
         # clear last action
         self.last_action = None
-        self.state = np.zeros((self.n_agent*2 + 2,self.n_row, self.n_col))
+        self.state = np.zeros((self.n_agent*3 + 1,self.n_row, self.n_col))
         for i in range(self.n_agent):
             cp = self.cur_pos[i]
             tp = self.tar_pos[i]
-            self.state[2*i+2][cp[0]][cp[1]]=1 #current position
+            self.state[i+1][cp[0]][cp[1]]=1 #current position
+            self.state[1+self.n_agent+self.obs_order[i]][tp[0]][tp[1]]=1
             self.state[self.get_agent_goal(i)][tp[0]][tp[1]]=1 #goal
-            self.state[1][cp[0]][cp[1]]=1 #shared agent channel
         for x in range(self.n_row):
             for y in range(self.n_col):
                 if self.raw_desc[x][y] == 'x':
@@ -348,6 +349,7 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
         return self.state
 
     # printer functions
+    #[TODO] to update printer functions
     def get_current_map(self):
         self.desc = self.raw_desc_backup.copy()
         # clear maps
@@ -363,7 +365,7 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
         # fill goals
         for i in range(self.n_agent):
             if self.cur_pos[i][0] > -1:
-                self.desc[self.tar_pos[i]] = chr(ord('a')+i)
+                self.desc[self.tar_pos[i]] = chr(ord('a')+self.obs_order[i])
         # fill agents
         for i in range(self.n_agent):
             x,y=self.cur_pos[i]
@@ -376,6 +378,7 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
                     self.desc[x][y] = c
 
     def get_content_str(self):
+        # [TODO] to add discrete message plot
         self.get_current_map()
         ret = ''
         for i in range(self.n_row):
@@ -383,8 +386,9 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
         for i in range(self.n_agent):
             c = chr(ord('A')+i)
             a = -1 if self.last_action is None else self.last_action[i]
-            ret += c + " -> " + self.direction_from_action(a) + "\n"
-        if self.agent_msgs is not None:
+            ret += c + ' <goal: ' + chr(ord('a')+self.obs_order[i])+' >'
+            ret += " -> " + self.direction_from_action(a) + "\n"
+        if self.has_comm_msg and self.agent_msgs is not None:
             for i in range(self.n_agent):
                 msg = np.array(self.agent_msgs[i])
                 msg_str = np.array2string(msg,precision=5,separator=',')
@@ -471,7 +475,10 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
         """
         # action is a list of int, containing action for each agent
 
-        assert (len(action) == self.n_agent)
+        if self.has_comm_msg:
+            assert (len(action) == self.n_agent * 2)
+        else:
+            assert (len(action) == self.n_agent)
 
         # if agent_i escapes, pos[i] = [-1, -1]
         coors = self.cur_pos
@@ -537,8 +544,7 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
         for i in range(self.n_agent):
             x, y = coors[i]
             if x > -1:
-                next_state[1][x][y] = 0
-                next_state[2*i+2][x][y] = 0
+                next_state[1+i][x][y] = 0
         # update next_state and check escape    
         for i in range(self.n_agent):
             if next_coors[i] == coors[i]: # didn't move, do nothing
@@ -548,7 +554,7 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
             if self.raw_desc[x][y] == chr(ord('a') + i): # reach goal
                 remain -= 1
                 reward += escape_reward # a good thing!
-                next_state[self.get_agent_goal(i)][x][y] = 0 # clear the target pos
+                #next_state[self.get_agent_goal(i)][x][y] = 0 # clear the target pos
                 next_coors[i] = (-1, -1)
             else: # normal move
                 # check distance
@@ -561,8 +567,7 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
         for i in range(self.n_agent):
             x, y = next_coors[i]
             if x > -1:
-                next_state[1][x][y] = 1
-                next_state[2*i+2][x][y] = 1
+                next_state[1+i][x][y] = 1
 
         # check if finished
         if remain == 0:
@@ -574,13 +579,17 @@ class MultiAgentDiscrCommGridWorldGuidedEnv(Env, Serializable):
 
     @cached_property
     def action_space(self):
-        return Product(self.n_agent * [Discrete(5)])
+        if self.has_comm_msg:
+            return Product(self.n_agent * [Discrete(5)] \
+                       + self.n_agent * [Discrete(self.n_agent)])
+        else:
+            return Product(self.n_agent * [Discrete(5)])
 
     @cached_property
     def observation_space(self):
         # channel 0: shared, raw map, -1 ~ hole, 0 ~ free, 1 ~ wall
-        # channel 1: shared, agent map, 0 ~ none, 1 ~ some agent
-        # channel 2 * i + 2: private, 1 ~ agent_i's location
-        # channel 2 * i + 3: private, 1 ~ agent_i's target
-        return Box(-1.0, 1.0, (self.n_agent*2+2,self.n_row,self.n_col))
+        # channel 1 + i: shared, agent map, 0 ~ none, 1 ~ some agent
+        # channel n_agent + 1 + i: private, 1 ~ agent_j's location
+        #     j = (i + 1) % n_agent when swap_obs = True
+        return Box(-1.0, 1.0, (self.n_agent*3+1,self.n_row,self.n_col))
 
