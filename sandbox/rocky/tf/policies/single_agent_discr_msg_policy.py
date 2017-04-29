@@ -39,7 +39,7 @@ class SingleAgentDiscreteMsgMLPPolicy(StochasticPolicy, LayersPowered, Serializa
         # NOTE: *IMPORTANT* 
         #    RLLab requires all the passed-in arguments to remain unchanged!
         #    Otherwise error will happen when loading a saved model
-        self.hidden_layers = hidden_layers.copy()
+        self.hidden_layers = tuple(hidden_layers)
 
         map_size = n_row * n_col
 

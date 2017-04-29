@@ -48,7 +48,7 @@ class TFMLPBaseline(Baseline, Parameterized, Serializable):
         Serializable.quick_init(self, locals())
         super(TFMLPBaseline, self).__init__(env_spec)
         self.net = None
-        self.layers = hidden_layers.copy()
+        self.layers = tuple(hidden_layers)
         if self.layers[-1] != 1:
             self.layers.append(1)
         self.var_shapes = []
