@@ -99,7 +99,7 @@ class TFMLPBaseline(Baseline, Parameterized, Serializable):
     @overrides
     def predict(self, path):
         if not self.init_flag:
-            return np.zeros(len(path["returns"]))  # reward
+            return np.zeros(len(path["rewards"]))  # reward
         else:
             ret = self.session.run(self.net, {self.x: path["observations"]})
             return np.reshape(ret, (ret.shape[0],))
