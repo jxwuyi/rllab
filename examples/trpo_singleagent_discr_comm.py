@@ -21,6 +21,7 @@ parser.add_argument('--desc', type=str)
 parser.add_argument('--iter', type=int, default=501)
 parser.add_argument('--pathlen', type=int, default=20)
 parser.add_argument('--maxsteps', type=int, default=10000)
+parser.add_argument('--maxkl', type=float, default=0.01)
 parser.add_argument('--n_goal', type=int, default=2)
 parser.add_argument('--gamma', type=float, default=0.9)
 parser.add_argument('--logdir', type=str,
@@ -98,7 +99,7 @@ algo = TRPO(
     max_path_length=args.pathlen,
     n_itr=args.iter,
     discount=args.gamma,
-    step_size=0.1,
+    step_size=args.maxkl,
 )
 
 algo.train()
