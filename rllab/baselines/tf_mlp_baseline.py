@@ -84,7 +84,7 @@ class TFMLPBaseline(Baseline, Parameterized, Serializable):
             l2 = (self.net - self.y) * (self.net - self.y)
             self.train = tf.train.AdamOptimizer().minimize(l2)
             self.session = tf.get_default_session()
-            self.session.run(tf.initialize_variables(self.vars))
+            self.session.run(tf.initialize_all_variables())
 
     @overrides
     def fit(self, paths):
