@@ -118,7 +118,7 @@ class SingleAgentDiscreteMsgMLPPolicy(StochasticPolicy, LayersPowered, Serializa
                     """
                     val = tf.reshape(msg, [-1, msg_dim, 1])
                     return tf.tile(val, [1, 1, map_size])
-                msg_input = L.OpLayer(msg, tile_func, shape_op=lambda x: (x[0], n_goals, map_size))
+                msg_input = L.reshape(L.OpLayer(msg, tile_func, shape_op=lambda x: (x[0], n_goals, map_size)), ([0], n_goals * map_size))
                 comb_input = L.concat([shared_map, msg_input, agent_loc], axis=1)
                 n_channel = n_goals * 2 + 2  # gloabl map, obs_goals, msg_channels, cur loc
                 recons_input = L.reshape(comb_input, ([0], n_channel, map_size))  # (batch, n_goals+2, map_size)
