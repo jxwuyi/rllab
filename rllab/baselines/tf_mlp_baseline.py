@@ -67,7 +67,7 @@ class TFMLPBaseline(Baseline, Parameterized, Serializable):
             self.y = tf.placeholder(tf.float32, shape=[None], name="y")
             self.vars = []
             prev = self.x
-            for l, d in self.layers:
+            for l, d in enumerate(self.layers):
                 if self.init_vals is None:
                     init_w = init_b = None
                 else:
