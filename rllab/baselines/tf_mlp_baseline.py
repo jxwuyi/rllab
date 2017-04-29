@@ -53,7 +53,7 @@ class TFMLPBaseline(Baseline, Parameterized, Serializable):
             self.layers += (-1,)
         self.var_shapes = []
         self.vars = None
-        self.input_dim = env_spec.flat_dim
+        self.input_dim = env_spec.observation_space.flat_dim
         self.init_vals = None
         self.init_flag = False
         for i, d in enumerate(hidden_layers):
