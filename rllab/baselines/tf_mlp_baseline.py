@@ -99,6 +99,8 @@ class TFMLPBaseline(Baseline, Parameterized, Serializable):
     @overrides
     def predict(self, path):
         if not self.init_flag:
+            if self.net is None:
+                self.create_net()
             return np.zeros(len(path["rewards"]))  # reward
         else:
             ret = self.session.run(self.net, {self.x: path["observations"]})
