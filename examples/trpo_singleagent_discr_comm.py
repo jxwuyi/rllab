@@ -31,6 +31,7 @@ parser.add_argument('--agent-escape', dest='escape', action='store_true',
                    help='when this flag set, agent will escape from the map immediately after reaching the goal')
 parser.set_defaults(escape=False)
 parser.add_argument('--activation', choices=['relu','elu'], default='relu')
+parser.add_argument('--baseline', choices=['mlp','linear'], default='mlp')
 parser.add_argument('--store_gap', type=int, default=20)
 args = parser.parse_args()
 ##
@@ -70,20 +71,6 @@ env = TfEnv(normalize(SingleAgentDiscrCommGridWorldGuidedEnv(n = n_goals,
                                                              agent_escape = args.escape,
                                                              max_timestep = args.pathlen)))
 
-"""
-self,
-            name,
-            n_row,
-            n_col,
-            n_goals,
-            env_spec,
-            conv_layers=(32, 16, 16),
-            hidden_layers=(32,),
-            act_dim=5,
-            hid_func=tf.nn.relu,
-            opt_msg=False,
-"""
-
 policy = SingleAgentDiscreteMsgMLPPolicy(
     'SingleAgentNet',
     n_row,
@@ -97,8 +84,10 @@ policy = SingleAgentDiscreteMsgMLPPolicy(
     opt_msg = args.opt_msg
 )
 
-#baseline = LinearFeatureBaseline(env_spec=env.spec)
-baseline = TFMLPBaseline(env_spec=env.spec, hidden_layers=(64, 32))
+if args.baseline == 'linear':
+    baseline = LinearFeatureBaseline(env_spec=env.spec)
+else:
+    baseline = TFMLPBaseline(env_spec=env.spec, hidden_layers=(64, 32))
 
 algo = TRPO(
     env=env,
